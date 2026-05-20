@@ -369,9 +369,9 @@
             inset: 0;
             background: rgba(17, 15, 12, 0.92);
             display: none;
-            align-items: center;
+            align-items: flex-start;
             justify-content: center;
-            padding: 24px;
+            padding: 4vh 24px 24px;
             z-index: 10;
         }
 
@@ -380,28 +380,112 @@
         }
 
         .modal-panel {
-            width: min(96vw, 1600px);
+            width: min(96vw, 1760px);
             max-height: 92vh;
+            position: relative;
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
 
-        .modal-panel img {
-            width: 100%;
-            height: auto;
-            max-height: calc(92vh - 64px);
-            object-fit: contain;
+        .modal-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            color: #f8f4ed;
+        }
+
+        .modal-title {
+            min-width: 0;
+            font-family: var(--mono);
+            font-size: 13px;
+            line-height: 1.4;
+            color: rgba(248, 244, 237, 0.86);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .modal-action {
+            border: 1px solid rgba(248, 244, 237, 0.24);
+            background: rgba(248, 244, 237, 0.1);
+            color: #f8f4ed;
+            padding: 7px 10px;
+            border-radius: 999px;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            min-height: 28px;
+            user-select: none;
+        }
+
+        .modal-action:hover,
+        .modal-action:active {
+            background: #f8f4ed;
+            color: #17120d;
+        }
+
+        .modal-action.active {
+            outline: 2px solid rgba(248, 244, 237, 0.72);
+            outline-offset: 2px;
+        }
+
+        .modal-frame {
+            margin: 0;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .modal-image-stage {
+            position: relative;
             border-radius: 18px;
             background: #0c0b08;
+            overflow: hidden;
+        }
+
+        .modal-frame img {
+            width: 100%;
+            height: auto;
+            max-height: calc(92vh - 96px);
+            object-fit: contain;
+            object-position: center center;
+            display: block;
+        }
+
+        .modal-original-image {
+            position: absolute;
+            inset: 0;
+            height: 100%;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .modal.show-original .modal-current-image {
+            opacity: 0;
+        }
+
+        .modal.show-original .modal-original-image {
+            opacity: 1;
         }
 
         .modal-caption {
+            min-height: 19px;
             color: #f8f4ed;
             display: flex;
             justify-content: space-between;
             gap: 12px;
             font-size: 13px;
+            line-height: 19px;
             font-family: var(--mono);
         }
 
@@ -443,6 +527,15 @@
 
             .experiments-strip {
                 --card-width: min(72vw, 280px);
+            }
+
+            .modal-toolbar {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .modal-actions {
+                justify-content: flex-start;
             }
         }
     </style>
@@ -488,11 +581,23 @@
 
     <div id="modal" class="modal">
         <div class="modal-panel">
-            <img id="modalImage" alt="">
-            <div class="modal-caption">
-                <span id="modalLeft"></span>
-                <span id="modalRight"></span>
+            <div class="modal-toolbar">
+                <div id="modalTitle" class="modal-title"></div>
+                <div class="modal-actions">
+                    <button id="modalOriginalButton" class="modal-action" type="button">原图</button>
+                    <button id="modalCloseButton" class="modal-action" type="button">关闭</button>
+                </div>
             </div>
+            <figure class="modal-frame">
+                <div class="modal-image-stage">
+                    <img id="modalImage" class="modal-current-image" alt="">
+                    <img id="modalOriginalImage" class="modal-original-image" alt="">
+                </div>
+                <figcaption class="modal-caption">
+                    <span id="modalLeft"></span>
+                    <span id="modalRight"></span>
+                </figcaption>
+            </figure>
         </div>
     </div>
 
@@ -504,6 +609,14 @@
             currentCategoryId: null,
             activeObjectUrls: [],
             renderToken: 0,
+            modal: {
+                showingOriginal: false,
+                currentUrl: "",
+                originalUrl: "",
+                currentLabel: "",
+                originalLabel: "",
+                sampleLabel: "",
+            },
         };
 
         const refs = {
@@ -517,9 +630,13 @@
             categoryTabs: document.getElementById("categoryTabs"),
             samplesBoard: document.getElementById("samplesBoard"),
             modal: document.getElementById("modal"),
+            modalTitle: document.getElementById("modalTitle"),
             modalImage: document.getElementById("modalImage"),
+            modalOriginalImage: document.getElementById("modalOriginalImage"),
             modalLeft: document.getElementById("modalLeft"),
             modalRight: document.getElementById("modalRight"),
+            modalOriginalButton: document.getElementById("modalOriginalButton"),
+            modalCloseButton: document.getElementById("modalCloseButton"),
         };
 
         function setStatus(message, isError = false) {
@@ -683,7 +800,7 @@
             }
         }
 
-        function createExperimentCard(category, sample, experiment, experimentData) {
+        function createExperimentCard(category, sample, experiment, experimentData, originalImage) {
             const card = document.createElement("article");
             card.className = "experiment-card";
 
@@ -701,8 +818,12 @@
                 return card;
             }
 
-            const imageUrl = state.archive.createObjectUrl(experimentData.image.bundlePath, "image/avif");
-            state.activeObjectUrls.push(imageUrl);
+            const imageUrl = originalImage?.experimentId === experiment.id
+                ? originalImage.url
+                : state.archive.createObjectUrl(experimentData.image.bundlePath, "image/avif");
+            if (originalImage?.experimentId !== experiment.id) {
+                state.activeObjectUrls.push(imageUrl);
+            }
 
             const imageWrap = document.createElement("div");
             imageWrap.className = "image-wrap";
@@ -710,7 +831,15 @@
 
             const imageNode = imageWrap.querySelector("img");
             imageNode.alt = `${category.id} / ${sample.id} / ${experiment.label}`;
-            imageNode.addEventListener("click", () => openModal(imageUrl, `${category.id} / ${sample.id}`, experiment.label));
+            imageNode.addEventListener("click", () => {
+                openModal({
+                    currentUrl: imageUrl,
+                    originalUrl: originalImage?.url || imageUrl,
+                    sampleLabel: `${category.id} / ${sample.id}`,
+                    currentLabel: experiment.label,
+                    originalLabel: originalImage?.label || experiment.label,
+                });
+            });
 
             card.appendChild(imageWrap);
             return card;
@@ -770,9 +899,22 @@
                 strip.className = "experiments-strip";
                 strip.dataset.experimentCount = String(state.manifest.experiments.length);
 
+                const firstExperiment = state.manifest.experiments[0] || null;
+                const firstExperimentData = firstExperiment ? sample.experiments?.[firstExperiment.id] || null : null;
+                let originalImage = null;
+                if (firstExperimentData?.image) {
+                    const originalUrl = state.archive.createObjectUrl(firstExperimentData.image.bundlePath, "image/avif");
+                    state.activeObjectUrls.push(originalUrl);
+                    originalImage = {
+                        url: originalUrl,
+                        label: firstExperiment.label,
+                        experimentId: firstExperiment.id,
+                    };
+                }
+
                 for (const experiment of state.manifest.experiments) {
                     const experimentData = sample.experiments?.[experiment.id] || null;
-                    strip.appendChild(createExperimentCard(category, sample, experiment, experimentData));
+                    strip.appendChild(createExperimentCard(category, sample, experiment, experimentData, originalImage));
                 }
 
                 row.appendChild(strip);
@@ -814,16 +956,42 @@
             }
         }
 
-        function openModal(imageUrl, leftText, rightText) {
-            refs.modalImage.src = imageUrl;
-            refs.modalLeft.textContent = leftText;
-            refs.modalRight.textContent = rightText;
+        function showModalOriginal(showOriginal) {
+            if (!refs.modal.classList.contains("open")) {
+                return;
+            }
+
+            state.modal.showingOriginal = showOriginal;
+            refs.modal.classList.toggle("show-original", showOriginal);
+            refs.modalOriginalButton.classList.toggle("active", showOriginal);
+        }
+
+        function openModal(detail) {
+            state.modal = {
+                showingOriginal: false,
+                currentUrl: detail.currentUrl,
+                originalUrl: detail.originalUrl || detail.currentUrl,
+                currentLabel: detail.currentLabel || "本图",
+                originalLabel: detail.originalLabel || "原图",
+                sampleLabel: detail.sampleLabel || "",
+            };
+
+            refs.modalTitle.textContent = state.modal.sampleLabel;
+            refs.modalLeft.textContent = state.modal.sampleLabel;
+            refs.modalRight.textContent = state.modal.currentLabel;
+            refs.modalImage.src = state.modal.currentUrl;
+            refs.modalOriginalImage.src = state.modal.originalUrl;
             refs.modal.classList.add("open");
+            showModalOriginal(false);
         }
 
         function closeModal() {
             refs.modal.classList.remove("open");
+            refs.modal.classList.remove("show-original");
             refs.modalImage.removeAttribute("src");
+            refs.modalOriginalImage.removeAttribute("src");
+            state.modal.showingOriginal = false;
+            refs.modalOriginalButton.classList.remove("active");
         }
 
         refs.pickButton.addEventListener("click", () => refs.fileInput.click());
@@ -857,15 +1025,37 @@
             }
         });
 
+        refs.modalOriginalButton.addEventListener("pointerdown", (event) => {
+            event.preventDefault();
+            showModalOriginal(true);
+        });
+        refs.modalOriginalButton.addEventListener("pointerup", () => showModalOriginal(false));
+        refs.modalOriginalButton.addEventListener("pointerleave", () => showModalOriginal(false));
+        refs.modalOriginalButton.addEventListener("pointercancel", () => showModalOriginal(false));
+        window.addEventListener("pointerup", () => showModalOriginal(false));
+        refs.modalCloseButton.addEventListener("click", () => closeModal());
+
         refs.modal.addEventListener("click", (event) => {
-            if (event.target === refs.modal || event.target === refs.modalImage) {
+            if (event.target === refs.modal) {
                 closeModal();
             }
         });
 
         document.addEventListener("keydown", (event) => {
+            const isModalOpen = refs.modal.classList.contains("open");
             if (event.key === "Escape") {
                 closeModal();
+            } else if (isModalOpen && event.code === "Space") {
+                event.preventDefault();
+                showModalOriginal(true);
+            }
+        });
+
+        document.addEventListener("keyup", (event) => {
+            const isModalOpen = refs.modal.classList.contains("open");
+            if (isModalOpen && event.code === "Space") {
+                event.preventDefault();
+                showModalOriginal(false);
             }
         });
 
